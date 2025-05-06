@@ -10,6 +10,7 @@ from typing import List, Optional
 import numpy as np
 from websockets.sync.server import serve
 from websockets.exceptions import ConnectionClosed
+from whisper_live.backend.faster_whisper_backend import ServeClientFasterWhisper
 from whisper_live.vad import VoiceActivityDetector
 from whisper_live.backend.base import ServeClientBase
 
@@ -185,7 +186,7 @@ class TranscriptionServer:
                                "Reverting to available backend: 'faster_whisper'"
                 }))
                 self.backend = BackendType.FASTER_WHISPER
-        
+
         if self.backend.is_openvino():
             try:
                 from whisper_live.backend.openvino_backend import ServeClientOpenVINO
@@ -377,6 +378,9 @@ class TranscriptionServer:
             host (str): The host address to bind the server.
             port (int): The port number to bind the server.
         """
+        if not BackendType.is_valid(backend):
+            raise ValueError(f"{backend} is not a valid backend type. Choose backend from {BackendType.valid_types()}")
+        backend = BackendType(backend)
         if faster_whisper_custom_model_path is not None and not os.path.exists(faster_whisper_custom_model_path):
             raise ValueError(f"Custom faster_whisper model '{faster_whisper_custom_model_path}' is not a valid path.")
         if whisper_tensorrt_path is not None and not os.path.exists(whisper_tensorrt_path):
@@ -385,15 +389,16 @@ class TranscriptionServer:
             if faster_whisper_custom_model_path or whisper_tensorrt_path:
                 logging.info("Custom model option was provided. Switching to single model mode.")
                 self.single_model = True
-                # TODO: load model initially
+                if backend.is_faster_whisper():
+                    ServeClientFasterWhisper.SINGLE_MODEL = ServeClientFasterWhisper.create_model(faster_whisper_custom_model_path)
+                else:
+                    logging.info("Model preload implemented only for faster whisper")
             else:
                 logging.info("Single model mode currently only works with custom models.")
-        if not BackendType.is_valid(backend):
-            raise ValueError(f"{backend} is not a valid backend type. Choose backend from {BackendType.valid_types()}")
         with serve(
             functools.partial(
                 self.recv_audio,
-                backend=BackendType(backend),
+                backend=backend,
                 faster_whisper_custom_model_path=faster_whisper_custom_model_path,
                 whisper_tensorrt_path=whisper_tensorrt_path,
                 trt_multilingual=trt_multilingual,

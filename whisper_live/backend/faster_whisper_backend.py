@@ -71,26 +71,14 @@ class ServeClientFasterWhisper(ServeClientBase):
         self.initial_prompt = initial_prompt
         self.vad_parameters = vad_parameters or {"onset": 0.5}
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        if device == "cuda":
-            major, _ = torch.cuda.get_device_capability(device)
-            self.compute_type = "float16" if major >= 7 else "float32"
-        else:
-            self.compute_type = "int8"
-
         if self.model_size_or_path is None:
             return
-        logging.info(f"Using Device={device} with precision {self.compute_type}")
     
         try:
             if single_model:
-                if ServeClientFasterWhisper.SINGLE_MODEL is None:
-                    self.create_model(device)
-                    ServeClientFasterWhisper.SINGLE_MODEL = self.transcriber
-                else:
-                    self.transcriber = ServeClientFasterWhisper.SINGLE_MODEL
+                self.transcriber = ServeClientFasterWhisper.SINGLE_MODEL
             else:
-                self.create_model(device)
+                self.transcriber = ServeClientFasterWhisper.create_model(self.model_size_or_path)
         except Exception as e:
             logging.error(f"Failed to load model: {e}")
             self.websocket.send(json.dumps({
@@ -116,14 +104,22 @@ class ServeClientFasterWhisper(ServeClientBase):
             )
         )
 
-    def create_model(self, device):
+    @staticmethod
+    def create_model(model_size_or_path):
         """
-        Instantiates a new model, sets it as the transcriber.
+        Instantiates a new model and returns it.
         """
-        self.transcriber = WhisperModel(
-            self.model_size_or_path,
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device == "cuda":
+            major, _ = torch.cuda.get_device_capability(device)
+            compute_type = "float16" if major >= 7 else "float32"
+        else:
+            compute_type = "int8"
+        logging.info(f"Using Device={device} with precision {compute_type}")
+        return WhisperModel(
+            model_size_or_path,
             device=device,
-            compute_type=self.compute_type,
+            compute_type=compute_type,
             local_files_only=False,
         )
 
